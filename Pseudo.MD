@@ -23,3 +23,9 @@ fi
 ```
 ./s.sh 2>/dev/null
 ```
+
+### Possible Issues
+- shell spawns in / not ~ dir ; add mitigation
+- wget isnt on system ; use curl or type mitgation 
+- known hosts has no write perms for user account
+- using a low priv user ; add mitigation
