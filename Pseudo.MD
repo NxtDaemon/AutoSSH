@@ -1,14 +1,16 @@
-## Pseudocode 
+## Pseudocode
+
 - Generate and store credentials to upload
-- Have the ability to open a netcat listening session and connect back to it
+- Have the ability to open a netcat listening session and Lect back to it
   - run enumeration commands to display to user
   - ID
   - Whoami
   - Uname -a
-- have a shell script that you can pull to the machine and run it 
+- have a shell script that you can pull to the machine and run it
 - be able to run it
 
-## Script to add key to hosts 
+## Script to add key to hosts
+
 ```
 #!/bin/bash
 key="content here"
@@ -20,12 +22,14 @@ else
 echo "completed"
 fi
 ```
+
 ```
 ./s.sh 2>/dev/null
 ```
 
 ### Possible Issues
+
 - shell spawns in / not ~ dir ; add mitigation
-- wget isnt on system ; use curl or type mitgation 
+- wget isnt on system ; use curl or type mitgation
 - known hosts has no write perms for user account
 - using a low priv user ; add mitigation
